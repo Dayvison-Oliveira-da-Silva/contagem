@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Contagem de Lotes - Shelf</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0f172a" />
+
+  <!-- Manifest PWA -->
+  <link rel="manifest" href="manifest.json">
+
+  <!-- Ícones (crie esses arquivos depois) -->
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" sizes="512x512" href="icons/icon-512.png">
+
+  <!-- Firebase (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #ffffff;
+      --card-soft: #f9fafb;
+      --text: #0f172a;
+      --text-soft: #6b7280;
+      --primary: #059669;
+      --primary-soft: #a7f3d0;
+      --border: #e5e7eb;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+      --success: #22c55e;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .app {
+      min-height: 100vh;
+      max-width: 480px;
+      margin: 0 auto;
+      background: linear-gradient(to bottom, #0f172a 0, #111827 120px, #f3f4f6 120px);
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 16px 16px 24px;
+      color: #f9fafb;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 1.25rem;
+      font-weight: 700;
+    }
+
+    header p {
+      margin: 4px 0 0;
+      font-size: 0.85rem;
+      color: #d1d5db;
+    }
+
+    main {
+      flex: 1;
+      padding: 0 12px 16px;
+    }
+
+    .card {
+      background: var(--card);
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.15);
+      padding: 12px 12px 8px;
+    }
+
+    .filters {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    label {
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--text-soft);
+    }
+
+    select,
+    input[type="text"] {
+      width: 100%;
+      border-radius: 999px;
+      border: 1px solid --var(--border);
+      padding: 8px 12px;
+      font-size: 0.9rem;
+      outline: none;
+      background: #f9fafb;
+      border: 1px solid var(--border);
+    }
+
+    select:focus,
+    input[type="text"]:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.3);
+      background: #ffffff;
+    }
+
+    #productList {
+      margin-top: 8px;
+      max-height: calc(100vh - 240px);
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .product-card {
+      background: var(--card-soft);
+      border-radius: 14px;
+      padding: 10px 10px 8px;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 8px;
+      border: 1px solid #e5e7eb;
+    }
+
+    .product-main { flex: 1; }
+
+    .product-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+
+    .product-sub {
+      font-size: 0.75rem;
+      color: var(--text-soft);
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 500;
+      margin-top: 4px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+    }
+
+    .status-pendente {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+    .status-pendente .status-dot { background: var(--danger); }
+
+    .status-parcial {
+      background: #fef3c7;
+      color: #b45309;
+    }
+    .status-parcial .status-dot { background: var(--warning); }
+
+    .status-finalizado {
+      background: #dcfce7;
+      color: #15803d;
+    }
+    .status-finalizado .status-dot { background: var(--success); }
+
+    .product-actions {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 6px;
+    }
+
+    .btn {
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 0.75rem;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+
+    .btn-outline {
+      background: #ffffff;
+      border: 1px solid #d1d5db;
+      color: #111827;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: #ecfdf5;
+    }
+
+    .btn-primary:active { transform: translateY(1px); }
+
+    .badge-sku {
+      font-size: 0.7rem;
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: #e5e7eb;
+      color: #374151;
+    }
+
+    .badge-ean {
+      font-size: 0.7rem;
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: #e0f2fe;
+      color: #0369a1;
+    }
+
+    /* MODAL */
+    .modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      justify-content: center;
+      align-items: flex-end;
+      z-index: 50;
+    }
+
+    .modal.show { display: flex; }
+
+    .modal-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.55);
+    }
+
+    .modal-content {
+      position: relative;
+      width: 100%;
+      max-width: 480px;
+      background: #f9fafb;
+      border-radius: 20px 20px 0 0;
+      padding: 12px 14px 14px;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 -10px 35px rgba(15, 23, 42, 0.4);
+      animation: slideUp 0.25s ease-out;
+    }
+
+    @keyframes slideUp {
+      from { transform: translateY(40px); opacity: 0; }
+      to   { transform: translateY(0);   opacity: 1; }
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .modal-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+    }
+
+    .modal-subtitle {
+      font-size: 0.75rem;
+      color: var(--text-soft);
+      margin-top: 2px;
+    }
+
+    .modal-close {
+      border: none;
+      background: transparent;
+      font-size: 1.3rem;
+      line-height: 1;
+      cursor: pointer;
+      padding: 4px;
+    }
+
+    .status-toggle {
+      display: flex;
+      gap: 6px;
+      margin: 6px 0 10px;
+      flex-wrap: wrap;
+    }
+
+    .status-toggle button {
+      flex: 1;
+      min-width: 0;
+      padding: 6px 6px;
+      border-radius: 999px;
+      border: 1px solid #e5e7eb;
+      font-size: 0.7rem;
+      background: #ffffff;
+      color: #374151;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+
+    .status-toggle button span.dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+    }
+
+    .status-toggle button[data-status="pendente"] span.dot {
+      background: var(--danger);
+    }
+    .status-toggle button[data-status="em_contagem"] span.dot {
+      background: var(--warning);
+    }
+    .status-toggle button[data-status="contado"] span.dot {
+      background: var(--success);
+    }
+
+    .status-toggle button.active {
+      border-width: 2px;
+      border-color: #0ea5e9;
+      background: #e0f2fe;
+    }
+
+    .lotes-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 4px;
+      font-size: 0.75rem;
+    }
+
+    .lotes-table th,
+    .lotes-table td {
+      padding: 4px 4px;
+      text-align: left;
+    }
+
+    .lotes-table thead {
+      position: sticky;
+      top: 0;
+      background: #e5e7eb;
+      z-index: 1;
+    }
+
+    .lote-row:nth-child(odd)  { background: #f9fafb; }
+    .lote-row:nth-child(even) { background: #f3f4f6; }
+
+    .lote-input,
+    .validade-input,
+    .qtd-input {
+      width: 100%;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      padding: 4px 6px;
+      font-size: 0.75rem;
+      box-sizing: border-box;
+    }
+
+    .qtd-input { text-align: right; }
+
+    .btn-icon {
+      border-radius: 8px;
+      border: none;
+      background: #fee2e2;
+      color: #b91c1c;
+      padding: 3px 6px;
+      font-size: 0.75rem;
+      cursor: pointer;
+    }
+
+    .modal-footer {
+      margin-top: 10px;
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+
+    .btn-secondary {
+      background: #e5e7eb;
+      color: #111827;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 16px 8px;
+      font-size: 0.8rem;
+      color: var(--text-soft);
+    }
+
+    @media (min-width: 600px) {
+      header h1 { font-size: 1.3rem; }
+      .app { border-radius: 0 0 24px 24px; }
+    }
+  </style>
+</head>
+
+<body>
+<div class="app">
+  <header>
+    <h1>Contagem de Lotes</h1>
+    <p>Selecione a marca, escolha o produto e registre lote, validade e quantidade.</p>
+  </header>
+
+  <main>
+    <div class="card">
+      <div class="filters">
+        <div>
+          <label for="brandSelect">Marca</label>
+          <select id="brandSelect">
+            <option value="">Selecione uma marca…</option>
+          </select>
+        </div>
+        <div>
+          <label for="searchInput">Pesquisar (descrição, SKU ou código de barras)</label>
+          <input id="searchInput" type="text" placeholder="Digite descrição, SKU ou EAN…" />
+        </div>
+      </div>
+
+      <div id="productList">
+        <div class="empty-state" id="emptyState">
+          Escolha uma marca para listar os produtos.
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- MODAL PRODUTO -->
+<div class="modal" id="productModal">
+  <div class="modal-backdrop" onclick="closeProductModal()"></div>
+  <div class="modal-content">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="modalTitle">Produto</div>
+        <div class="modal-subtitle" id="modalSubtitle"></div>
+      </div>
+      <button class="modal-close" onclick="closeProductModal()">×</button>
+    </div>
+
+    <div>
+      <label>Status da contagem</label>
+      <div class="status-toggle" id="statusToggle">
+        <button type="button" data-status="pendente">
+          <span class="dot"></span>
+          Pendente
+        </button>
+        <button type="button" data-status="em_contagem">
+          <span class="dot"></span>
+          Em contagem
+        </button>
+        <button type="button" data-status="contado">
+          <span class="dot"></span>
+          Contado
+        </button>
+      </div>
+    </div>
+
+    <div style="margin-top:4px;">
+      <label>Lotes cadastrados</label>
+      <table class="lotes-table">
+        <thead>
+        <tr>
+          <th style="width:26%;">Lote</th>
+          <th style="width:34%;">Validade</th>
+          <th style="width:24%;">Qtde</th>
+          <th style="width:16%;"></th>
+        </tr>
+        </thead>
+        <tbody id="lotesBody">
+        </tbody>
+      </table>
+      <button type="button" class="btn btn-secondary" style="margin-top:6px;" id="btnAddLote">
+        + Adicionar lote
+      </button>
+    </div>
+
+    <div class="modal-footer">
+      <button type="button" class="btn btn-secondary" onclick="closeProductModal()">Cancelar</button>
+      <button type="button" class="btn btn-primary" id="btnSaveLotes">Salvar lotes</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ========= CONFIGURAR FIREBASE =========
+  const firebaseConfig = {
+    apiKey: "SUA_API_KEY_AQUI",
+    authDomain: "gerenciador-shelf-dental-med.firebaseapp.com",
+    databaseURL: "https://gerenciador-shelf-dental-med-default-rtdb.firebaseio.com",
+    projectId: "gerenciador-shelf-dental-med",
+  };
+
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+
+  // ========= ESTADO GLOBAL =========
+  let currentBrand = null;
+  let currentProducts = {}; // { sku: {...produto} }
+  let modalBrand = null;
+  let modalSku = null;
+
+  function statusToClass(status) {
+    if (status === "contado") return "status-finalizado";
+    if (status === "em_contagem") return "status-parcial";
+    return "status-pendente";
+  }
+
+  function statusToLabel(status) {
+    if (status === "contado") return "Contado";
+    if (status === "em_contagem") return "Em contagem";
+    return "Pendente";
+  }
+
+  // DD-MM-YYYY -> YYYY-MM-DD
+  function brToIso(brDate) {
+    if (!brDate) return "";
+    const parts = brDate.split("-");
+    if (parts.length !== 3) return "";
+    const [d, m, y] = parts;
+    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  }
+
+  // YYYY-MM-DD -> DD-MM-YYYY
+  function isoToBr(isoDate) {
+    if (!isoDate) return "";
+    const parts = isoDate.split("-");
+    if (parts.length !== 3) return "";
+    const [y, m, d] = parts;
+    return `${d.padStart(2, "0")}-${m.padStart(2, "0")}-${y}`;
+  }
+
+  function clearProductList(message) {
+    const list = document.getElementById("productList");
+    list.innerHTML = "";
+    const div = document.createElement("div");
+    div.className = "empty-state";
+    div.textContent = message;
+    list.appendChild(div);
+  }
+
+  // ========= CARREGAR MARCAS =========
+  function loadBrands() {
+    const rootRef = db.ref();
+    rootRef.once("value")
+      .then((snap) => {
+        const data = snap.val() || {};
+        const select = document.getElementById("brandSelect");
+        Object.keys(data)
+          .sort()
+          .forEach((brandKey) => {
+            const produtos = data[brandKey] || {};
+            const count = Object.keys(produtos).length;
+            const opt = document.createElement("option");
+            opt.value = brandKey;
+            opt.textContent = `${brandKey} (${count} produtos)`;
+            select.appendChild(opt);
+          });
+      })
+      .catch((err) => {
+        console.error("Erro ao carregar marcas:", err);
+      });
+  }
+
+  // ========= CARREGAR PRODUTOS DE UMA MARCA =========
+  function loadProductsForBrand(brandKey) {
+    if (!brandKey) {
+      currentBrand = null;
+      currentProducts = {};
+      clearProductList("Escolha uma marca para listar os produtos.");
+      return;
+    }
+
+    currentBrand = brandKey;
+    const refBrand = db.ref(brandKey);
+
+    clearProductList("Carregando produtos…");
+
+    refBrand.once("value")
+      .then((snap) => {
+        const data = snap.val() || {};
+        currentProducts = data;
+        renderProductList();
+      })
+      .catch((err) => {
+        console.error("Erro ao carregar produtos:", err);
+      });
+  }
+
+  // ========= RENDERIZAR LISTA =========
+  function renderProductList() {
+    const list = document.getElementById("productList");
+    const searchTerm = document.getElementById("searchInput").value.trim().toLowerCase();
+
+    list.innerHTML = "";
+
+    const entries = Object.entries(currentProducts);
+    const filtered = entries.filter(([sku, prod]) => {
+      if (!searchTerm) return true;
+      const desc = (prod.descricao || "").toLowerCase();
+      const skuStr = (sku || "").toLowerCase();
+      const codBar = String(prod.codBar || "").toLowerCase();
+      return (
+        desc.includes(searchTerm) ||
+        skuStr.includes(searchTerm) ||
+        codBar.includes(searchTerm)
+      );
+    });
+
+    if (!filtered.length) {
+      clearProductList("Nenhum produto encontrado para esse filtro.");
+      return;
+    }
+
+    filtered.sort((a, b) => a[0].localeCompare(b[0]));
+
+    filtered.forEach(([sku, prod]) => {
+      const card = document.createElement("div");
+      card.className = "product-card";
+
+      const main = document.createElement("div");
+      main.className = "product-main";
+
+      const title = document.createElement("div");
+      title.className = "product-title";
+      title.textContent = prod.descricao || "(sem descrição)";
+
+      const sub = document.createElement("div");
+      sub.className = "product-sub";
+
+      const codBar = prod.codBar || "-";
+
+      sub.innerHTML = `
+        <span class="badge-sku">SKU ${sku}</span>
+        &nbsp;·&nbsp;
+        <span class="badge-ean">EAN ${codBar}</span>
+        &nbsp;·&nbsp;
+        Unid.: ${prod.unidade || "-"}
+      `;
+
+      const status = prod.statusContagem || "pendente";
+      const pill = document.createElement("div");
+      pill.className = `status-pill ${statusToClass(status)}`;
+      pill.innerHTML = `<span class="status-dot"></span>${statusToLabel(status)}`;
+
+      main.appendChild(title);
+      main.appendChild(sub);
+      main.appendChild(pill);
+
+      const actions = document.createElement("div");
+      actions.className = "product-actions";
+
+      const btnOpen = document.createElement("button");
+      btnOpen.className = "btn btn-outline";
+      btnOpen.textContent = "Contar / Lotes";
+      btnOpen.addEventListener("click", () => {
+        openProductModal(currentBrand, sku, prod);
+      });
+
+      actions.appendChild(btnOpen);
+
+      card.appendChild(main);
+      card.appendChild(actions);
+
+      list.appendChild(card);
+    });
+  }
+
+  // ========= MODAL =========
+  function openProductModal(brand, sku, prod) {
+    modalBrand = brand;
+    modalSku = sku;
+
+    document.getElementById("modalTitle").textContent =
+      prod.descricao || "(sem descrição)";
+
+    const codBar = prod.codBar || "-";
+
+    document.getElementById("modalSubtitle").textContent =
+      `Marca: ${brand} · SKU: ${sku} · EAN: ${codBar} · Unid.: ${prod.unidade || "-"}`;
+
+    // Status
+    const statusAtual = prod.statusContagem || "pendente";
+    const buttons = document.querySelectorAll("#statusToggle button");
+    buttons.forEach((btn) => {
+      btn.classList.toggle("active", btn.getAttribute("data-status") === statusAtual);
+    });
+
+    // Lotes
+    const tbody = document.getElementById("lotesBody");
+    tbody.innerHTML = "";
+
+    const estoque = prod.estoque || {};
+    const entries = Object.entries(estoque);
+
+    if (entries.length) {
+      entries.forEach(([lote, valObj]) => {
+        const valEntries = Object.entries(valObj || {});
+        let validadeBr = "";
+        let qtd = "";
+        if (valEntries.length) {
+          validadeBr = valEntries[0][0];
+          qtd = valEntries[0][1];
+        }
+        addLoteRow(lote, brToIso(validadeBr), qtd);
+      });
+    }
+
+    // linha vazia para novo lote
+    addLoteRow("", "", "");
+
+    document.getElementById("productModal").classList.add("show");
+  }
+
+  function closeProductModal() {
+    document.getElementById("productModal").classList.remove("show");
+    modalBrand = null;
+    modalSku = null;
+  }
+
+  function addLoteRow(lote = "", validadeIso = "", qtd = "") {
+    const tbody = document.getElementById("lotesBody");
+    const tr = document.createElement("tr");
+    tr.className = "lote-row";
+
+    tr.innerHTML = `
+      <td><input type="text" class="lote-input" placeholder="Ex.: 1155" value="${lote}" /></td>
+      <td><input type="date" class="validade-input" value="${validadeIso}" /></td>
+      <td><input type="number" min="0" class="qtd-input" value="${qtd}" /></td>
+      <td style="text-align:right;">
+        <button type="button" class="btn-icon">&times;</button>
+      </td>
+    `;
+
+    tr.querySelector(".btn-icon").addEventListener("click", () => {
+      tbody.removeChild(tr);
+    });
+
+    tbody.appendChild(tr);
+  }
+
+  function saveLotes() {
+    if (!modalBrand || !modalSku) return;
+
+    const tbody = document.getElementById("lotesBody");
+    const rows = tbody.querySelectorAll(".lote-row");
+
+    const estoquePayload = {};
+
+    rows.forEach((row) => {
+      const lote = row.querySelector(".lote-input").value.trim();
+      const validadeIso = row.querySelector(".validade-input").value;
+      const qtdStr = row.querySelector(".qtd-input").value.trim();
+
+      if (!lote || !validadeIso || !qtdStr) return;
+
+      const qtd = parseInt(qtdStr, 10);
+      if (isNaN(qtd)) return;
+
+      const validadeBr = isoToBr(validadeIso);
+      if (!estoquePayload[lote]) estoquePayload[lote] = {};
+      estoquePayload[lote][validadeBr] = qtd;
+    });
+
+    const estoqueRef = db.ref(`${modalBrand}/${modalSku}/estoque`);
+    estoqueRef
+      .set(estoquePayload)
+      .then(() => {
+        if (!currentProducts[modalSku]) currentProducts[modalSku] = {};
+        currentProducts[modalSku].estoque = estoquePayload;
+        closeProductModal();
+      })
+      .catch((err) => {
+        console.error("Erro ao salvar lotes:", err);
+      });
+  }
+
+  function updateStatus(status) {
+    if (!modalBrand || !modalSku) return;
+
+    const statusRef = db.ref(`${modalBrand}/${modalSku}/statusContagem`);
+    statusRef
+      .set(status)
+      .then(() => {
+        if (!currentProducts[modalSku]) currentProducts[modalSku] = {};
+        currentProducts[modalSku].statusContagem = status;
+
+        const buttons = document.querySelectorAll("#statusToggle button");
+        buttons.forEach((btn) => {
+          btn.classList.toggle("active", btn.getAttribute("data-status") === status);
+        });
+
+        renderProductList();
+      })
+      .catch((err) => {
+        console.error("Erro ao atualizar status:", err);
+      });
+  }
+
+  // ========= REGISTRO DO SERVICE WORKER (PWA) =========
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker
+        .register("service-worker.js")
+        .catch((err) => console.log("SW falhou:", err));
+    });
+  }
+
+  // ========= EVENTOS =========
+  window.addEventListener("DOMContentLoaded", () => {
+    loadBrands();
+
+    document.getElementById("brandSelect").addEventListener("change", (e) => {
+      loadProductsForBrand(e.target.value);
+    });
+
+    document.getElementById("searchInput").addEventListener("input", () => {
+      renderProductList();
+    });
+
+    document.getElementById("btnAddLote").addEventListener("click", () => {
+      addLoteRow("", "", "");
+    });
+
+    document.getElementById("btnSaveLotes").addEventListener("click", saveLotes);
+
+    document.querySelectorAll("#statusToggle button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const status = btn.getAttribute("data-status");
+        updateStatus(status);
+      });
+    });
+  });
+</script>
+</body>
+</html>
