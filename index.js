@@ -1,42 +1,60 @@
-// importar_produtos.js
-// Uso: node importar_produtos.js
+// importar_produtos_firestore.js
+// Uso: node importar_produtos_firestore.js
 //
-// Lê a planilha Excel fixa em FILE_PATH e envia para o
-// Realtime Database em: /<marca>/<codigo>/
+// Lê a planilha (FILE_PATH) e salva no Firestore em:
+// collection: PRODUTOS_COLLECTION
+// docId: ID (coluna "ID")
+// campos: sku, descricao, unidade, gtin (+ marca se existir)
 //
-// Atualiza apenas:
-//   - descricao
-//   - unidade
-//   - codBar (GTIN/EAN)
-// Não mexe em: estoque, statusContagem, etc.
+// Atualiza via merge (não apaga campos existentes).
 
 const XLSX = require("xlsx");
-const axios = require("axios");
+const admin = require("firebase-admin");
+const path = require("path");
 
-// ========== CONFIGURAÇÕES ==========
+// ====== CONFIG ======
+const FILE_PATH = "./produtos.xls"; // ou .xlsx
 
-// URL base do seu RTDB
-const FIREBASE_BASE =
-  "https://gerenciador-shelf-dental-med-default-rtdb.firebaseio.com";
+// Nome da coleção no Firestore
+const PRODUTOS_COLLECTION = "produtos";
 
-// Caminho fixo da planilha (na mesma pasta do script)
-const FILE_PATH = "./produtos.xls";
+// Caminho da chave service account
+const SERVICE_ACCOUNT_PATH = "./serviceAccountKey.json";
 
-// nomes EXATOS das colunas do Excel (ajuste se necessário)
+// nomes EXATOS das colunas do Excel
 const COLS = {
-  marca: "Marca",
-  codigo: "Código (SKU)",   // confira no log e ajuste se o cabeçalho for diferente
+  id: "ID",
+  codigo: "Código (SKU)",
   descricao: "Descrição",
   unidade: "Unidade",
   gtin: "GTIN/EAN",
-};
 
-// ===================================
+  // opcional (se existir na sua planilha)
+  marca: "Marca",
+};
+// =====================
+
+function initFirestore() {
+  const serviceAccount = require(path.resolve(SERVICE_ACCOUNT_PATH));
+
+  if (!admin.apps.length) {
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+    });
+  }
+
+  return admin.firestore();
+}
+
+function chunkArray(arr, size) {
+  const chunks = [];
+  for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+  return chunks;
+}
 
 async function main() {
   console.log("Lendo planilha:", FILE_PATH);
 
-  // Lê o arquivo Excel (primeira aba)
   const workbook = XLSX.readFile(FILE_PATH);
   const sheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[sheetName];
@@ -48,64 +66,75 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`Aba: ${sheetName} | ${linhas.length} linhas de produto.\n`);
-
+  console.log(`Aba: ${sheetName} | ${linhas.length} linhas.\n`);
   console.log("Colunas detectadas na primeira linha:");
   console.log(Object.keys(linhas[0]));
-  console.log(
-    "\nSe algum nome não bater com COLS ali em cima, ajuste e rode de novo.\n"
-  );
+  console.log("");
+
+  const db = initFirestore();
+  const colRef = db.collection(PRODUTOS_COLLECTION);
 
   let ok = 0;
+  let ignorados = 0;
   let erro = 0;
 
-  for (let i = 0; i < linhas.length; i++) {
-    const row = linhas[i];
+  // Firestore batch limite: 500 writes
+  const batches = chunkArray(linhas, 500);
 
-    const marca    = (row[COLS.marca]    || "").toString().trim();
-    const codigo   = (row[COLS.codigo]   || "").toString().trim();
-    const descricao= (row[COLS.descricao]|| "").toString().trim();
-    const unidade  = (row[COLS.unidade]  || "").toString().trim();
-    const gtin     = (row[COLS.gtin]     || "").toString().trim();
+  for (let b = 0; b < batches.length; b++) {
+    const batch = db.batch();
+    const chunk = batches[b];
 
-    if (!marca || !codigo) {
-      console.log(
-        `(${i + 1}) [IGNORADO] Linha sem Marca ou Código. Marca="${marca}" Código="${codigo}"`
-      );
-      continue;
+    for (let i = 0; i < chunk.length; i++) {
+      const row = chunk[i];
+
+      const id = (row[COLS.id] || "").toString().trim();
+      const sku = (row[COLS.codigo] || "").toString().trim();
+      const descricao = (row[COLS.descricao] || "").toString().trim();
+      const unidade = (row[COLS.unidade] || "").toString().trim();
+      const gtin = (row[COLS.gtin] || "").toString().trim();
+
+      // marca é opcional
+      const marca = COLS.marca ? (row[COLS.marca] || "").toString().trim() : "";
+
+      if (!id || !sku) {
+        ignorados++;
+        continue;
+      }
+
+      const docId = id; // pai principal
+      const docRef = colRef.doc(docId);
+
+      const payload = {
+        sku,
+        descricao,
+        unidade,
+        gtin,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+
+      // só salva marca se realmente existir/estiver preenchida
+      if (marca) payload.marca = marca;
+
+      // merge: true => atualiza sem apagar outros campos existentes
+      batch.set(docRef, payload, { merge: true });
     }
 
-    const marcaKey = marca.toLowerCase();   // "GOLGRAN" -> "golgran"
-    const skuKey   = codigo;               // "44-1"
-
-    const url = `${FIREBASE_BASE}/${encodeURIComponent(
-      marcaKey
-    )}/${encodeURIComponent(skuKey)}.json`;
-
-    const payload = {
-      descricao,
-      unidade,
-      codBar: gtin,
-    };
-
     try {
-      await axios.patch(url, payload);
-      ok++;
-      console.log(
-        `(${i + 1}) ✅ ${marcaKey}/${skuKey} atualizado. EAN=${gtin || "-"}`
-      );
-    } catch (err) {
+      await batch.commit();
+      ok += chunk.length;
+      console.log(`✅ Batch ${b + 1}/${batches.length} gravado (${chunk.length} docs)`);
+    } catch (e) {
       erro++;
-      console.error(
-        `(${i + 1}) ❌ ERRO em ${marcaKey}/${skuKey}:`,
-        err.response?.data || err.message
-      );
+      console.error(`❌ Erro no batch ${b + 1}:`, e.message);
     }
   }
 
   console.log("\n===== RESUMO =====");
-  console.log("Sucesso:", ok);
-  console.log("Erros:  ", erro);
+  console.log("Linhas na planilha:", linhas.length);
+  console.log("Ignorados (sem ID ou SKU):", ignorados);
+  console.log("Batches com erro:", erro);
+  console.log("Processados (tentados):", ok);
 }
 
 main().catch((e) => {
